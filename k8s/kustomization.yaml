@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: socialsync
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - secret.example.yaml
+  - postgres.yaml
+  - redis.yaml
+  - migration-job.yaml
+  - post-service.yaml
+  - media-service.yaml
+  - publisher-service.yaml
+  - frontend.yaml
+  - hpa.yaml
+  - ingress.yaml
+  - networkpolicy.yaml

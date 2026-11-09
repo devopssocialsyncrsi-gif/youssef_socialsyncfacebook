@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: socialsync-config
+  namespace: socialsync
+data:
+  POSTGRES_DB: socialsync
+  POSTGRES_USER: postgres
+  ADMIN_USER: admin
+  REDIS_URL: redis://redis:6379/0
+  POST_SERVICE_URL: http://post-service:8000
+  MEDIA_SERVICE_URL: http://media-service:8001
+  MEDIA_DIR: /data
+  MAX_UPLOAD_MB: "200"
+  RUN_MIGRATIONS: "false"
+  DRY_RUN: "true"
+  LINKEDIN_DRY_RUN: ""
+  FACEBOOK_DRY_RUN: ""
+  INSTAGRAM_DRY_RUN: ""
+  YOUTUBE_DRY_RUN: ""
+  LOG_LEVEL: INFO
+  META_API_VERSION: v22.0
+  LINKEDIN_API_VERSION: "202610"
+  YOUTUBE_PRIVACY_STATUS: private
+  PUBLIC_MEDIA_BASE_URL: ""

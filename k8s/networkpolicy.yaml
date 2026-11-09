@@ -1,0 +1,26 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: restrict-redis, namespace: socialsync}
+spec:
+  podSelector: {matchLabels: {app: redis}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {matchLabels: {app: post-service}}
+        - podSelector: {matchLabels: {app: publisher-service}}
+      ports: [{protocol: TCP, port: 6379}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: restrict-postgres, namespace: socialsync}
+spec:
+  podSelector: {matchLabels: {app: postgres}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {matchLabels: {app: post-service}}
+        - podSelector: {matchLabels: {app: media-service}}
+        - podSelector: {matchLabels: {app: publisher-service}}
+        # The one-shot migration job also needs to create roles and migrate.
+        - podSelector: {matchLabels: {app: migrations}}
+      ports: [{protocol: TCP, port: 5432}]

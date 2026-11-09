@@ -1,0 +1,120 @@
+name: socialsync
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-socialsync}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-socialsync-local-db}
+      POST_DB_PASSWORD: ${POST_DB_PASSWORD:-socialsync-local-post}
+      MEDIA_DB_PASSWORD: ${MEDIA_DB_PASSWORD:-socialsync-local-media}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init.sh:/docker-entrypoint-initdb.d/10-socialsync.sh:ro
+      - ./db/init.sql:/socialsync/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+    networks: [socialsync]
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes: ["redis_data:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    networks: [socialsync]
+
+  media-service:
+    image: socialsync-media:local
+    build: ./services/media-service
+    environment:
+      DATABASE_URL: postgresql+psycopg://socialsync_media:${MEDIA_DB_PASSWORD:-socialsync-local-media}@postgres:5432/${POSTGRES_DB:-socialsync}
+      JWT_SECRET: ${JWT_SECRET:-socialsync-local-jwt-secret-change-before-deployment}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-200}
+      DEFAULT_COVER: ${DEFAULT_COVER:-/app/default_cover.png}
+      MEDIA_DIR: /data
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      RUN_MIGRATIONS: "true"
+    volumes: ["media_data:/data"]
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: unless-stopped
+    networks: [socialsync]
+
+  post-service:
+    image: socialsync-post:local
+    build: ./services/post-service
+    environment:
+      DATABASE_URL: postgresql+psycopg://socialsync_post:${POST_DB_PASSWORD:-socialsync-local-post}@postgres:5432/${POSTGRES_DB:-socialsync}
+      REDIS_URL: redis://redis:6379/0
+      MEDIA_SERVICE_URL: http://media-service:8001
+      ADMIN_USER: ${ADMIN_USER:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-socialsync-local-admin}
+      JWT_SECRET: ${JWT_SECRET:-socialsync-local-jwt-secret-change-before-deployment}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-socialsync-local-internal-key}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      RUN_MIGRATIONS: "true"
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      media-service: {condition: service_healthy}
+    restart: unless-stopped
+    networks: [socialsync]
+
+  publisher-service:
+    image: socialsync-publisher:local
+    build: ./services/publisher-service
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      POST_SERVICE_URL: http://post-service:8000
+      MEDIA_SERVICE_URL: http://media-service:8001
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-socialsync-local-internal-key}
+      DRY_RUN: ${DRY_RUN:-true}
+      LINKEDIN_DRY_RUN: ${LINKEDIN_DRY_RUN:-}
+      FACEBOOK_DRY_RUN: ${FACEBOOK_DRY_RUN:-}
+      INSTAGRAM_DRY_RUN: ${INSTAGRAM_DRY_RUN:-}
+      YOUTUBE_DRY_RUN: ${YOUTUBE_DRY_RUN:-}
+      LINKEDIN_ACCESS_TOKEN: ${LINKEDIN_ACCESS_TOKEN:-}
+      LINKEDIN_AUTHOR_URN: ${LINKEDIN_AUTHOR_URN:-}
+      LINKEDIN_API_VERSION: ${LINKEDIN_API_VERSION:-202610}
+      FACEBOOK_PAGE_ACCESS_TOKEN: ${FACEBOOK_PAGE_ACCESS_TOKEN:-}
+      FACEBOOK_PAGE_ID: ${FACEBOOK_PAGE_ID:-}
+      INSTAGRAM_ACCESS_TOKEN: ${INSTAGRAM_ACCESS_TOKEN:-}
+      INSTAGRAM_USER_ID: ${INSTAGRAM_USER_ID:-}
+      PUBLIC_MEDIA_BASE_URL: ${PUBLIC_MEDIA_BASE_URL:-}
+      META_API_VERSION: ${META_API_VERSION:-v22.0}
+      YOUTUBE_ACCESS_TOKEN: ${YOUTUBE_ACCESS_TOKEN:-}
+      YOUTUBE_PRIVACY_STATUS: ${YOUTUBE_PRIVACY_STATUS:-private}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      redis: {condition: service_healthy}
+      post-service: {condition: service_healthy}
+      media-service: {condition: service_healthy}
+    restart: unless-stopped
+    networks: [socialsync]
+
+  frontend:
+    image: socialsync-frontend:local
+    build: ./frontend
+    ports: ["${FRONTEND_PORT:-8080}:8080"]
+    depends_on:
+      post-service: {condition: service_healthy}
+      media-service: {condition: service_healthy}
+    restart: unless-stopped
+    networks: [socialsync]
+
+volumes:
+  postgres_data:
+  redis_data:
+  media_data:
+networks:
+  socialsync:
+    driver: bridge

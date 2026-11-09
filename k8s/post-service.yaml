@@ -1,0 +1,49 @@
+apiVersion: v1
+kind: Service
+metadata: {name: post-service, namespace: socialsync}
+spec:
+  selector: {app: post-service}
+  ports: [{name: http, port: 8000, targetPort: 8000}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: post-service, namespace: socialsync}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: post-service}}
+  template:
+    metadata: {labels: {app: post-service}}
+    spec:
+      initContainers:
+        - name: wait-for-migrations
+          image: socialsync-post:local
+          imagePullPolicy: IfNotPresent
+          envFrom: [{configMapRef: {name: socialsync-config}}]
+          env:
+            - name: POST_DB_PASSWORD
+              valueFrom: {secretKeyRef: {name: socialsync-secrets, key: POST_DB_PASSWORD}}
+            - name: DATABASE_URL
+              value: postgresql+psycopg://socialsync_post:$(POST_DB_PASSWORD)@postgres:5432/$(POSTGRES_DB)
+          command: [sh, -c, 'until python -c "from app.db import engine; from sqlalchemy import text; engine.connect().execute(text(\"SELECT 1 FROM post_svc.posts LIMIT 1\"))"; do sleep 3; done']
+      containers:
+        - name: post-service
+          image: socialsync-post:local
+          imagePullPolicy: IfNotPresent
+          envFrom: [{configMapRef: {name: socialsync-config}}]
+          env:
+            - name: POST_DB_PASSWORD
+              valueFrom: {secretKeyRef: {name: socialsync-secrets, key: POST_DB_PASSWORD}}
+            - name: DATABASE_URL
+              value: postgresql+psycopg://socialsync_post:$(POST_DB_PASSWORD)@postgres:5432/$(POSTGRES_DB)
+            - name: ADMIN_PASSWORD
+              valueFrom: {secretKeyRef: {name: socialsync-secrets, key: ADMIN_PASSWORD}}
+            - name: JWT_SECRET
+              valueFrom: {secretKeyRef: {name: socialsync-secrets, key: JWT_SECRET}}
+            - name: INTERNAL_API_KEY
+              valueFrom: {secretKeyRef: {name: socialsync-secrets, key: INTERNAL_API_KEY}}
+          ports: [{name: http, containerPort: 8000}]
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+          readinessProbe: {httpGet: {path: /ready, port: http}, periodSeconds: 5, initialDelaySeconds: 3}
+          livenessProbe: {httpGet: {path: /health, port: http}, periodSeconds: 10, initialDelaySeconds: 15}

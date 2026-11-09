@@ -1,0 +1,48 @@
+# Optional hot-reload services. The dev profile is disabled during a normal compose up.
+# Run: docker compose --profile dev up --build frontend-dev post-service-dev media-service-dev
+services:
+  frontend-dev:
+    image: node:20-alpine
+    profiles: [dev]
+    working_dir: /app
+    command: sh -c "npm install --no-audit --no-fund && npm run dev"
+    ports: ["5173:8080"]
+    volumes: ["./frontend:/app", "frontend_node_modules:/app/node_modules"]
+    depends_on:
+      post-service: {condition: service_healthy}
+      media-service: {condition: service_healthy}
+    networks: [socialsync]
+  post-service-dev:
+    image: socialsync-post:local
+    build: ./services/post-service
+    profiles: [dev]
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    ports: ["8003:8000"]
+    volumes: ["./services/post-service:/app"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://socialsync_post:${POST_DB_PASSWORD:-socialsync-local-post}@postgres:5432/${POSTGRES_DB:-socialsync}
+      REDIS_URL: redis://redis:6379/0
+      MEDIA_SERVICE_URL: http://media-service:8001
+      ADMIN_USER: ${ADMIN_USER:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-socialsync-local-admin}
+      JWT_SECRET: ${JWT_SECRET:-socialsync-local-jwt-secret-change-before-deployment}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-socialsync-local-internal-key}
+    depends_on:
+      post-service: {condition: service_healthy}
+    networks: [socialsync]
+  media-service-dev:
+    image: socialsync-media:local
+    build: ./services/media-service
+    profiles: [dev]
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+    ports: ["8004:8001"]
+    volumes: ["./services/media-service:/app", "media_data:/data"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://socialsync_media:${MEDIA_DB_PASSWORD:-socialsync-local-media}@postgres:5432/${POSTGRES_DB:-socialsync}
+      JWT_SECRET: ${JWT_SECRET:-socialsync-local-jwt-secret-change-before-deployment}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-200}
+    depends_on:
+      media-service: {condition: service_healthy}
+    networks: [socialsync]
+volumes:
+  frontend_node_modules:

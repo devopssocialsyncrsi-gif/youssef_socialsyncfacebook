@@ -1,0 +1,64 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: socialsync-migrations
+  namespace: socialsync
+spec:
+  backoffLimit: 10
+  template:
+    metadata: {labels: {app: migrations}}
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        - name: create-schemas
+          image: postgres:16-alpine
+          envFrom:
+            - configMapRef: {name: socialsync-config}
+            - secretRef: {name: socialsync-secrets}
+          env:
+            - name: PGPASSWORD
+              valueFrom: {secretKeyRef: {name: socialsync-secrets, key: POSTGRES_PASSWORD}}
+          command:
+            - sh
+            - -ec
+            - |
+              until pg_isready -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do sleep 2; done
+              psql -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -v post_password="$POST_DB_PASSWORD" -v media_password="$MEDIA_DB_PASSWORD" <<'SQL'
+              SELECT format('CREATE ROLE socialsync_post LOGIN PASSWORD %L', :'post_password') WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname='socialsync_post') \gexec
+              SELECT format('CREATE ROLE socialsync_media LOGIN PASSWORD %L', :'media_password') WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname='socialsync_media') \gexec
+              SELECT format('ALTER ROLE socialsync_post PASSWORD %L', :'post_password') \gexec
+              SELECT format('ALTER ROLE socialsync_media PASSWORD %L', :'media_password') \gexec
+              CREATE SCHEMA IF NOT EXISTS post_svc AUTHORIZATION socialsync_post;
+              CREATE SCHEMA IF NOT EXISTS media_svc AUTHORIZATION socialsync_media;
+              ALTER SCHEMA post_svc OWNER TO socialsync_post;
+              ALTER SCHEMA media_svc OWNER TO socialsync_media;
+              REVOKE ALL ON SCHEMA post_svc FROM PUBLIC;
+              REVOKE ALL ON SCHEMA media_svc FROM PUBLIC;
+              SQL
+        - name: migrate-posts
+          image: socialsync-post:local
+          imagePullPolicy: IfNotPresent
+          envFrom: [{configMapRef: {name: socialsync-config}}]
+          env:
+            - name: POST_DB_PASSWORD
+              valueFrom: {secretKeyRef: {name: socialsync-secrets, key: POST_DB_PASSWORD}}
+            - name: DATABASE_URL
+              value: postgresql+psycopg://socialsync_post:$(POST_DB_PASSWORD)@postgres:5432/$(POSTGRES_DB)
+          command: [alembic, upgrade, head]
+        - name: migrate-media
+          image: socialsync-media:local
+          imagePullPolicy: IfNotPresent
+          envFrom: [{configMapRef: {name: socialsync-config}}]
+          env:
+            - name: MEDIA_DB_PASSWORD
+              valueFrom: {secretKeyRef: {name: socialsync-secrets, key: MEDIA_DB_PASSWORD}}
+            - name: DATABASE_URL
+              value: postgresql+psycopg://socialsync_media:$(MEDIA_DB_PASSWORD)@postgres:5432/$(POSTGRES_DB)
+          command: [alembic, upgrade, head]
+      containers:
+        - name: complete
+          image: busybox:1.36
+          command: [sh, -c, 'echo "Migrations complete"']
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {cpu: 100m, memory: 64Mi}
